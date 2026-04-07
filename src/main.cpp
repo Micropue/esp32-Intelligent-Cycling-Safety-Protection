@@ -58,46 +58,64 @@ void saveLockState()
 // 函数：绘制锁定的锁头
 void drawLockedLock(int centerX, int centerY)
 {
-  // 锁弧 - U形闭合
-  display.drawCircle(centerX - 6, centerY - 3, 8, SSD1306_WHITE);  // 左圆
-  display.drawCircle(centerX + 6, centerY - 3, 8, SSD1306_WHITE);  // 右圆
-  for (int i = -6; i <= 6; i++)
+  // 锁弧 - 光滑的U形（闭合）
+  // 绘制圆弧
+  for (int i = -7; i <= 7; i++)
   {
-    display.drawPixel(centerX + i, centerY - 11, SSD1306_WHITE);   // 锁弧顶部
+    int yOffset = centerY - 12 + (int)(5 - sqrt(49 - i * i));
+    if (yOffset >= 0 && yOffset < 64)
+      display.drawPixel(centerX + i, yOffset, SSD1306_WHITE);
   }
   
-  // 锁体 - 矩形主体
-  display.drawRect(centerX - 10, centerY + 3, 20, 12, SSD1306_WHITE);
+  // 左右竖边连接
+  display.drawLine(centerX - 7, centerY - 7, centerX - 7, centerY + 3, SSD1306_WHITE);
+  display.drawLine(centerX + 7, centerY - 7, centerX + 7, centerY + 3, SSD1306_WHITE);
   
-  // 钥孔 - 圆形
-  display.fillCircle(centerX, centerY + 8, 2, SSD1306_WHITE);
-  display.drawPixel(centerX, centerY + 11, SSD1306_WHITE);  // 钥孔下面的线
-  display.drawPixel(centerX, centerY + 12, SSD1306_WHITE);
+  // 锁体 - 矩形主体
+  display.drawRect(centerX - 8, centerY + 3, 16, 10, SSD1306_WHITE);
+  
+  // 钥孔 - 上圆下竖
+  display.fillCircle(centerX, centerY + 6, 1, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 8, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 9, SSD1306_WHITE);
 }
 
 // 函数：绘制解锁的锁头
 void drawUnlockedLock(int centerX, int centerY)
 {
-  // 锁弧 - U形打开
-  display.drawCircle(centerX - 6, centerY - 3, 8, SSD1306_WHITE);  // 左圆
-  display.drawCircle(centerX + 6, centerY - 3, 8, SSD1306_WHITE);  // 右圆
-  // 只绘制左右两边
-  for (int i = -8; i <= 0; i++)
+  // 锁弧 - U形打开（不闭合）
+  // 绘制左边的弧
+  for (int i = -7; i <= 0; i++)
   {
-    display.drawPixel(centerX - 8, centerY - 3 + i, SSD1306_WHITE);   // 左边
+    int yOffset = centerY - 12 + (int)(5 - sqrt(49 - i * i));
+    if (yOffset >= 0 && yOffset < 64)
+      display.drawPixel(centerX + i, yOffset, SSD1306_WHITE);
   }
-  for (int i = 0; i <= 8; i++)
+  
+  // 绘制右边的弧
+  for (int i = 0; i <= 7; i++)
   {
-    display.drawPixel(centerX + 8, centerY - 3 + i, SSD1306_WHITE);   // 右边
+    int yOffset = centerY - 12 + (int)(5 - sqrt(49 - i * i));
+    if (yOffset >= 0 && yOffset < 64)
+      display.drawPixel(centerX + i, yOffset, SSD1306_WHITE);
   }
+  
+  // 左竖边
+  display.drawLine(centerX - 7, centerY - 7, centerX - 7, centerY + 3, SSD1306_WHITE);
+  
+  // 右竖边打开，只绘制部分
+  display.drawLine(centerX + 7, centerY - 2, centerX + 7, centerY + 3, SSD1306_WHITE);
+  
+  // 上面打开的弧线
+  display.drawLine(centerX + 5, centerY - 9, centerX + 10, centerY - 5, SSD1306_WHITE);
   
   // 锁体 - 矩形主体
-  display.drawRect(centerX - 10, centerY + 3, 20, 12, SSD1306_WHITE);
+  display.drawRect(centerX - 8, centerY + 3, 16, 10, SSD1306_WHITE);
   
-  // 钥孔 - 圆形
-  display.fillCircle(centerX, centerY + 8, 2, SSD1306_WHITE);
-  display.drawPixel(centerX, centerY + 11, SSD1306_WHITE);  // 钥孔下面的线
-  display.drawPixel(centerX, centerY + 12, SSD1306_WHITE);
+  // 钥孔 - 上圆下竖
+  display.fillCircle(centerX, centerY + 6, 1, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 8, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 9, SSD1306_WHITE);
 }
 
 // 函数：绘制护盾图标
