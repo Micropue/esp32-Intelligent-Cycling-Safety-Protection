@@ -55,27 +55,118 @@ void saveLockState()
   Serial.println("[SAVED]");
 }
 
+// 函数：绘制锁定的锁头
+void drawLockedLock(int centerX, int centerY)
+{
+  // 锁弧 - U形闭合
+  display.drawCircle(centerX - 6, centerY - 3, 8, SSD1306_WHITE);  // 左圆
+  display.drawCircle(centerX + 6, centerY - 3, 8, SSD1306_WHITE);  // 右圆
+  for (int i = -6; i <= 6; i++)
+  {
+    display.drawPixel(centerX + i, centerY - 11, SSD1306_WHITE);   // 锁弧顶部
+  }
+  
+  // 锁体 - 矩形主体
+  display.drawRect(centerX - 10, centerY + 3, 20, 12, SSD1306_WHITE);
+  
+  // 钥孔 - 圆形
+  display.fillCircle(centerX, centerY + 8, 2, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 11, SSD1306_WHITE);  // 钥孔下面的线
+  display.drawPixel(centerX, centerY + 12, SSD1306_WHITE);
+}
+
+// 函数：绘制解锁的锁头
+void drawUnlockedLock(int centerX, int centerY)
+{
+  // 锁弧 - U形打开
+  display.drawCircle(centerX - 6, centerY - 3, 8, SSD1306_WHITE);  // 左圆
+  display.drawCircle(centerX + 6, centerY - 3, 8, SSD1306_WHITE);  // 右圆
+  // 只绘制左右两边
+  for (int i = -8; i <= 0; i++)
+  {
+    display.drawPixel(centerX - 8, centerY - 3 + i, SSD1306_WHITE);   // 左边
+  }
+  for (int i = 0; i <= 8; i++)
+  {
+    display.drawPixel(centerX + 8, centerY - 3 + i, SSD1306_WHITE);   // 右边
+  }
+  
+  // 锁体 - 矩形主体
+  display.drawRect(centerX - 10, centerY + 3, 20, 12, SSD1306_WHITE);
+  
+  // 钥孔 - 圆形
+  display.fillCircle(centerX, centerY + 8, 2, SSD1306_WHITE);
+  display.drawPixel(centerX, centerY + 11, SSD1306_WHITE);  // 钥孔下面的线
+  display.drawPixel(centerX, centerY + 12, SSD1306_WHITE);
+}
+
+// 函数：绘制护盾图标
+void drawShieldIcon(int x, int y)
+{
+  // 盾牌形：上圆弧，下梯形
+  // 绘制顶部圆弧
+  for (int i = -5; i <= 5; i++)
+  {
+    int yOffset = (i * i) / 10;  // 二次曲线近似
+    display.drawPixel(x + i, y - yOffset, SSD1306_WHITE);
+  }
+  
+  // 绘制左边
+  display.drawLine(x - 5, y, x - 4, y + 6, SSD1306_WHITE);
+  
+  // 绘制右边
+  display.drawLine(x + 5, y, x + 4, y + 6, SSD1306_WHITE);
+  
+  // 绘制底部
+  display.drawLine(x - 4, y + 6, x + 4, y + 6, SSD1306_WHITE);
+  
+  // 绘制中间的竖线装饰
+  display.drawLine(x, y, x, y + 5, SSD1306_WHITE);
+}
+
+// 函数：绘制自行车图标
+void drawBicycleIcon(int x, int y)
+{
+  // 左轮
+  display.drawCircle(x + 3, y, 4, SSD1306_WHITE);
+  display.drawPixel(x + 3, y - 1, SSD1306_WHITE);
+  display.drawPixel(x + 3, y + 1, SSD1306_WHITE);
+  display.drawPixel(x + 2, y, SSD1306_WHITE);
+  display.drawPixel(x + 4, y, SSD1306_WHITE);
+  
+  // 右轮
+  display.drawCircle(x + 13, y, 4, SSD1306_WHITE);
+  display.drawPixel(x + 13, y - 1, SSD1306_WHITE);
+  display.drawPixel(x + 13, y + 1, SSD1306_WHITE);
+  display.drawPixel(x + 12, y, SSD1306_WHITE);
+  display.drawPixel(x + 14, y, SSD1306_WHITE);
+  
+  // 车架 - 从左轮到右轮的斜线
+  display.drawLine(x + 7, y - 3, x + 3, y, SSD1306_WHITE);  // 左上支撑
+  display.drawLine(x + 7, y - 3, x + 13, y, SSD1306_WHITE); // 右上支撑
+  
+  // 座椅
+  display.drawPixel(x + 8, y - 4, SSD1306_WHITE);
+  display.drawPixel(x + 9, y - 4, SSD1306_WHITE);
+  
+  // 把手
+  display.drawPixel(x + 3, y - 5, SSD1306_WHITE);
+  display.drawPixel(x + 3, y - 6, SSD1306_WHITE);
+}
+
 // 函数：显示上锁界面
 void displayLocked()
 {
   display.clearDisplay();
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  // 绘制锁头（简单的ASCII艺术）
-  display.setTextSize(2);
-  display.setCursor(45, 10);
-  display.println("[]");
-  display.setCursor(40, 26);
-  display.println("[==]");
-  display.setCursor(45, 42);
-  display.println("||");
+  // 绘制锁定的锁头
+  drawLockedLock(64, 18);
   
   // 下方显示护盾图标和文字
   display.setTextSize(1);
-  display.setCursor(5, 55);
-  display.println("[#]");  // 护盾图标
-  display.setCursor(45, 55);
+  drawShieldIcon(10, 50);
+  display.setCursor(25, 52);
   display.println("Under Surveillance");
   
   display.display();
@@ -85,23 +176,15 @@ void displayLocked()
 void displayUnlocked()
 {
   display.clearDisplay();
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  // 绘制已解锁的锁头（简单的ASCII艺术）
-  display.setTextSize(2);
-  display.setCursor(45, 10);
-  display.println("[ ]");
-  display.setCursor(40, 26);
-  display.println("[  ]");
-  display.setCursor(45, 42);
-  display.println("||");
+  // 绘制解锁的锁头
+  drawUnlockedLock(64, 18);
   
   // 下方显示自行车图标和文字
   display.setTextSize(1);
-  display.setCursor(5, 55);
-  display.println("(o)");  // 自行车图标
-  display.setCursor(35, 55);
+  drawBicycleIcon(10, 54);
+  display.setCursor(28, 52);
   display.println("Cycling Safety Mode");
   
   display.display();
