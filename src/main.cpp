@@ -113,18 +113,44 @@ void drawUnlockedLock(int centerX, int centerY)
   display.fillRect(centerX - 1, centerY + 7, 3, 5, SSD1306_BLACK);
 }
 
+// 函数：绘制警告三角 ⚠️
+void drawWarningTriangle(int centerX, int centerY)
+{
+  // 绘制外层三角形边框
+  display.drawTriangle(
+    centerX, centerY - 16,        // 顶部顶点
+    centerX - 16, centerY + 10,   // 左下角
+    centerX + 16, centerY + 10,   // 右下角
+    SSD1306_WHITE
+  );
+  
+  // 绘制内层三角形边框（加粗效果）
+  display.drawTriangle(
+    centerX, centerY - 14,        
+    centerX - 14, centerY + 9,    
+    centerX + 14, centerY + 9,    
+    SSD1306_WHITE
+  );
+
+  // 绘制感叹号
+  // 上部竖线
+  display.fillRect(centerX - 1, centerY - 6, 3, 9, SSD1306_WHITE);
+  // 下部圆点
+  display.fillRect(centerX - 1, centerY + 5, 3, 3, SSD1306_WHITE);
+}
+
 // 函数：显示上锁界面
 void displayLocked()
 {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   
-  // 绘制锁定的锁头 (居中，位置微调)
+  // 绘制锁定的锁头
   drawLockedLock(64, 22);
   
-  // 下方显示文字 (已移除图标，文字居中)
+  // 下方显示文字
   display.setTextSize(1);
-  display.setCursor(10, 50); // 微调居中 (128 - 18字符*6像素) / 2 = 10
+  display.setCursor(10, 50); 
   display.println("Under Surveillance");
   
   display.display();
@@ -139,11 +165,28 @@ void displayUnlocked()
   // 绘制解锁的锁头
   drawUnlockedLock(64, 22);
   
-  // 下方显示文字 (已移除图标，文字居中)
+  // 下方显示文字
   display.setTextSize(1);
-  display.setCursor(7, 50); // 微调居中 (128 - 19字符*6像素) / 2 = ~7
+  display.setCursor(7, 50); 
   display.println("Cycling Safety Mode");
   
+  display.display();
+}
+
+// 函数：显示未授权警告界面
+void displayUnauthorized()
+{
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  // 绘制警告三角
+  drawWarningTriangle(64, 20);
+
+  // 下方显示警告文字 (19个字符，微调居中)
+  display.setTextSize(1);
+  display.setCursor(7, 50); 
+  display.println("Unauthorized Access");
+
   display.display();
 }
 
@@ -224,11 +267,27 @@ void loop()
   else
   {
     Serial.println("[Unauthorized Card]");
+    
+    // 显示警告界面
+    displayUnauthorized();
+    
+    // 等待3秒
+    delay(3000);
+    
+    // 恢复之前的界面
+    if (isLocked)
+    {
+      displayLocked();
+    }
+    else
+    {
+      displayUnlocked();
+    }
   }
 
   // 停止读卡
   mfrc522.PICC_HaltA();
   mfrc522.PCD_StopCrypto1();
 
-  delay(100); // 延迟0.1秒，避免重复检测
+  delay(100); // 延迟1秒，避免重复检测
 }
