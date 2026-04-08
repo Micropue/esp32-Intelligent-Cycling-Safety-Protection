@@ -8,6 +8,7 @@
 #include <WebServer.h>
 #include <LittleFS.h>
 #include <WebSocketsServer.h>
+#include <math.h>
 // 针脚定义
 #define RST_PIN 27 // RST -> GPIO27
 #define SS_PIN 5   // SDA -> GPIO5
@@ -17,14 +18,21 @@
 #define LOCKED_STRING "[LOCKED]"
 #define UNLOCKED_STRING "[UNLOCKED]"
 #define BUZZER_PIN 4 // 蜂鸣器连接到 GPIO9
-
+#define SERVOMOTER_IO 17 // 舵机连接到 GPIO17
+// 舵机（使用 ESP32 LEDC PWM 控制）
+#define SERVO_CHANNEL 0
+#define SERVO_FREQ 50
+#define SERVO_RESOLUTION 16
+#define SERVO_MIN_PULSE_US 1000
+#define SERVO_MAX_PULSE_US 2000
+int servoAngle = 90; // 初始角度（中位）
 // OLED定义
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C
 
-const char *ssid = "Micropue iPhone 13";
-const char *password = "Wangyitong-20070818";
+const char *ssid = "YCYMate 60 Pro";
+const char *password = "12345678";
 // 持久化存储实例
 Preferences preferences;
 
@@ -42,6 +50,37 @@ void beep(int times, int duration);
 WebSocketsServer webSocket = WebSocketsServer(81);
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length);
 void sendLockStateWS();
+void applyLockServo(bool locked);
+void setServoAngle(int angle);
+// 单独用于 MPU 数据的 WebSocket（端口 82）
+WebSocketsServer webSocketMPU = WebSocketsServer(82);
+void webSocketMPUEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length);
+// 前向声明 MPUData 以便在下面的函数原型中使用
+struct MPUData;
+void sendMPUDataWS(MPUData &d);
+
+// MPU 报文发送阈值与节流
+#define MPU_READ_INTERVAL_MS 200
+#define MPU_SEND_MIN_INTERVAL_MS 200
+#define MPU_ANGLE_THRESHOLD_DEG 5.0f
+#define MPU_GYRO_THRESHOLD_DPS 30.0f
+float lastPitch = 10000.0f;
+float lastRoll = 10000.0f;
+unsigned long lastMPUReadMs = 0;
+unsigned long lastMPUSendMs = 0;
+// MPU6050 (use separate I2C on GPIO21 SDA, GPIO22 SCL)
+TwoWire I2C_MPU = TwoWire(1);
+#define MPU_ADDR 0x68
+#define MPU_PWR_MGMT_1 0x6B
+#define MPU_ACCEL_XOUT_H 0x3B
+#define MPU_GYRO_XOUT_H 0x43
+struct MPUData
+{
+  float ax, ay, az;
+  float gx, gy, gz;
+};
+bool initMPU();
+bool readMPU(MPUData &data);
 
 // 函数：获取卡片UID字符串
 String getCardUID()
@@ -264,6 +303,7 @@ void initWebServer()
     isLocked = true;
     saveLockState();
     sendLockStateWS();
+    applyLockServo(true);
     beep(2, 100); // 锁定时滴滴两声
     displayLocked();
     String json = "{\"isLocked\":true}";
@@ -276,6 +316,7 @@ void initWebServer()
     isLocked = false;
     saveLockState();
     sendLockStateWS();
+    applyLockServo(false);
     beep(2, 100); // 锁定时滴滴两声
     displayUnlocked();
     String json = "{\"isLocked\":false}";
@@ -292,6 +333,10 @@ void initWebServer()
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WebSocket] Started on port 81");
+  // 启动 MPU 专用 WebSocket (端口 82)
+  webSocketMPU.begin();
+  webSocketMPU.onEvent(webSocketMPUEvent);
+  Serial.println("[WebSocket-MPU] Started on port 82");
 }
 
 // WebSocket 事件处理
@@ -306,13 +351,39 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
   {
     IPAddress ip = webSocket.remoteIP(num);
     Serial.printf("[WS] Client %u connected from %u.%u.%u.%u\n", num, ip[0], ip[1], ip[2], ip[3]);
-    // 连接时发送当前状态
+    // 连接时仅发送当前锁状态（MPU 数据独立通过 82 端口推送）
     String json = String("{\"isLocked\":") + (isLocked ? "true" : "false") + "}";
     webSocket.sendTXT(num, json);
   }
   break;
   case WStype_TEXT:
     Serial.printf("[WS] Received from %u: %s\n", num, payload);
+    break;
+  default:
+    break;
+  }
+}
+
+// MPU WebSocket 事件处理（端口82）
+void webSocketMPUEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
+  switch (type)
+  {
+  case WStype_DISCONNECTED:
+    Serial.printf("[WS-MPU] Client %u disconnected\n", num);
+    break;
+  case WStype_CONNECTED:
+  {
+    IPAddress ip = webSocketMPU.remoteIP(num);
+    Serial.printf("[WS-MPU] Client %u connected from %u.%u.%u.%u\n", num, ip[0], ip[1], ip[2], ip[3]);
+    // 连接时发送一次当前 MPU 数据
+    MPUData d = {0, 0, 0, 0, 0, 0};
+    readMPU(d);
+    sendMPUDataWS(d);
+  }
+  break;
+  case WStype_TEXT:
+    Serial.printf("[WS-MPU] Received from %u: %s\n", num, payload);
     break;
   default:
     break;
@@ -326,6 +397,92 @@ void sendLockStateWS()
   webSocket.broadcastTXT(json);
   Serial.print("[WS] Broadcast: ");
   Serial.println(json);
+}
+
+// 发送 MPU 数据到专用 WebSocket（端口82）
+void sendMPUDataWS(MPUData &d)
+{
+  String json = String("{\"mpu\":{");
+  json += "\"accel\":{\"x\":" + String(d.ax, 3) + ",\"y\":" + String(d.ay, 3) + ",\"z\":" + String(d.az, 3) + "},";
+  json += "\"gyro\":{\"x\":" + String(d.gx, 3) + ",\"y\":" + String(d.gy, 3) + ",\"z\":" + String(d.gz, 3) + "}";
+  json += "}}";
+  webSocketMPU.broadcastTXT(json);
+  Serial.print("[WS-MPU] Broadcast: ");
+  Serial.println(json);
+}
+
+// 初始化 MPU6050，返回是否成功
+bool initMPU()
+{
+  I2C_MPU.beginTransmission(MPU_ADDR);
+  I2C_MPU.write(MPU_PWR_MGMT_1);
+  I2C_MPU.write(0x00); // wake up
+  int res = I2C_MPU.endTransmission();
+  delay(50);
+  return (res == 0);
+}
+
+// 读取 MPU6050 加速度和陀螺仪（单位：g 和 deg/s），返回是否成功
+bool readMPU(MPUData &data)
+{
+  // request 14 bytes starting at ACCEL_XOUT_H
+  I2C_MPU.beginTransmission(MPU_ADDR);
+  I2C_MPU.write(MPU_ACCEL_XOUT_H);
+  if (I2C_MPU.endTransmission(false) != 0)
+    return false;
+  if (I2C_MPU.requestFrom(MPU_ADDR, (uint8_t)14) != 14)
+    return false;
+  int16_t ax = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t ay = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t az = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t tmp = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t gx = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t gy = (I2C_MPU.read() << 8) | I2C_MPU.read();
+  int16_t gz = (I2C_MPU.read() << 8) | I2C_MPU.read();
+
+  // 默认传感器量程：加速度 ±2g, 陀螺 ±250 deg/s
+  data.ax = (float)ax / 16384.0;
+  data.ay = (float)ay / 16384.0;
+  data.az = (float)az / 16384.0;
+  data.gx = (float)gx / 131.0;
+  data.gy = (float)gy / 131.0;
+  data.gz = (float)gz / 131.0;
+  return true;
+}
+
+// 设置舵机角度（0-180），通过 LEDC 输出对应脉宽
+void setServoAngle(int angle)
+{
+  if (angle < 0)
+    angle = 0;
+  if (angle > 180)
+    angle = 180;
+  servoAngle = angle;
+  uint32_t period_us = 1000000UL / SERVO_FREQ; // 20000
+  uint32_t maxDuty = (1UL << SERVO_RESOLUTION) - 1;
+  uint32_t pulse_us = map(servoAngle, 0, 180, SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US);
+  uint32_t duty = (pulse_us * maxDuty) / period_us;
+  ledcWrite(SERVO_CHANNEL, duty);
+  Serial.printf("[SERVO] set angle=%d pulse=%u duty=%u\n", servoAngle, (unsigned)pulse_us, (unsigned)duty);
+}
+
+// 根据上锁/解锁动作相对移动舵机：上锁 -90，解锁 +90（并在 0-180 范围内截断）
+void applyLockServo(bool locked)
+{
+  if (locked)
+  {
+    int newAngle = servoAngle - 90;
+    if (newAngle < 0)
+      newAngle = 0;
+    setServoAngle(newAngle);
+  }
+  else
+  {
+    int newAngle = servoAngle + 90;
+    if (newAngle > 180)
+      newAngle = 180;
+    setServoAngle(newAngle);
+  }
 }
 void setup()
 {
@@ -355,6 +512,22 @@ void setup()
   // 初始化蜂鸣器引脚
   pinMode(BUZZER_PIN, OUTPUT);   // 初始化蜂鸣器引脚
   digitalWrite(BUZZER_PIN, LOW); // 默认关闭蜂鸣器
+  // 初始化舵机 PWM
+  ledcSetup(SERVO_CHANNEL, SERVO_FREQ, SERVO_RESOLUTION);
+  ledcAttachPin(SERVOMOTER_IO, SERVO_CHANNEL);
+  // 初始位置为中位，再根据当前锁状态调整
+  setServoAngle(servoAngle);
+  applyLockServo(isLocked);
+  // 初始化 MPU6050 的 I2C（SDA=21, SCL=22）并唤醒传感器
+  I2C_MPU.begin(21, 22, 400000);
+  if (initMPU())
+  {
+    Serial.println("[MPU] Initialized");
+  }
+  else
+  {
+    Serial.println("[MPU] Init failed");
+  }
                                  // TODO: 后续添加这个功能
   // TODO:  初始化文件系统
   initFS();
@@ -383,17 +556,47 @@ void loop()
 {
   // 处理 Web 服务器请求
   server.handleClient();
-  // 保持 WebSocket 事件循环
+  // 保持 WebSocket 事件循环（包括 MPU 专用通道）
   webSocket.loop();
+  webSocketMPU.loop();
 
-  // 检查是否有新卡片
+  unsigned long now = millis();
+  // 周期性读取 MPU 并在偏移时通过 82 端口广播
+  if (now - lastMPUReadMs >= MPU_READ_INTERVAL_MS)
+  {
+    MPUData d;
+    if (readMPU(d))
+    {
+      const float RAD2DEG = 57.29577951308232f;
+      float pitch = atan2f(-d.ax, sqrtf(d.ay * d.ay + d.az * d.az)) * RAD2DEG;
+      float roll = atan2f(d.ay, d.az) * RAD2DEG;
+
+      bool moved = false;
+      if (lastPitch == 10000.0f || lastRoll == 10000.0f)
+        moved = true; // 首次发送
+      else if (fabsf(pitch - lastPitch) >= MPU_ANGLE_THRESHOLD_DEG || fabsf(roll - lastRoll) >= MPU_ANGLE_THRESHOLD_DEG)
+        moved = true;
+      else if (fabsf(d.gx) >= MPU_GYRO_THRESHOLD_DPS || fabsf(d.gy) >= MPU_GYRO_THRESHOLD_DPS || fabsf(d.gz) >= MPU_GYRO_THRESHOLD_DPS)
+        moved = true;
+
+      if (moved && (now - lastMPUSendMs >= MPU_SEND_MIN_INTERVAL_MS))
+      {
+        sendMPUDataWS(d);
+        lastPitch = pitch;
+        lastRoll = roll;
+        lastMPUSendMs = now;
+      }
+    }
+    lastMPUReadMs = now;
+  }
+
+  // RFID：仅在检测到卡片时处理完整流程
   if (!mfrc522.PICC_IsNewCardPresent())
   {
     delay(10);
     return;
   }
 
-  // 选择卡片
   if (!mfrc522.PICC_ReadCardSerial())
   {
     return;
@@ -411,8 +614,10 @@ void loop()
     isLocked = !isLocked;
     // 保存新状态到闪存
     saveLockState();
-    // 广播新状态到所有 WebSocket 客户端
+    // 广播新状态到 81 端口
     sendLockStateWS();
+    // 移动舵机到对应位置（上锁 -90，解锁 +90）
+    applyLockServo(isLocked);
     if (isLocked)
     {
       Serial.println("[LOCKED]");
@@ -446,6 +651,7 @@ void loop()
 
       // 处理 WebSocket 循环，保持连接活跃
       webSocket.loop();
+      webSocketMPU.loop();
 
       beep(1, 100); // 每次滴响 100ms
       delay(100);   // 间隔 100ms

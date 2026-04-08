@@ -6,6 +6,10 @@ const router = createRouter({
     {
       path: '/',
       component: Index
+    },
+    {
+      path: '/mpu',
+      component: () => import("$/mpu/index.vue")
     }
   ],
 })

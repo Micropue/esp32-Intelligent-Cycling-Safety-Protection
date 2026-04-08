@@ -1,7 +1,7 @@
 <template>
     <div class="home">
         <div class="status">
-            <div class="lock" v-if="status.locked">
+            <div class="lock" v-if="status.locked && !status.loading">
                 <svg viewBox="0 -960 960 960">
                     <path
                         d="M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h40v-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm0-80h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM360-640h240v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80ZM240-160v-400 400Z">
@@ -9,7 +9,7 @@
                 </svg>
                 <p>已锁定</p>
             </div>
-            <div class="lockopen" v-else>
+            <div class="lockopen" v-else-if="!status.loading">
                 <svg viewBox="0 -960 960 960">
                     <path
                         d="M240-640h360v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85h-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640Zm0 480h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM240-160v-400 400Z">
@@ -17,8 +17,12 @@
                 </svg>
                 <p>已解锁</p>
             </div>
+            <div class="loading" v-if="status.loading">
+                <md-circular-progress indeterminate class="loop" style="--_active-indicator-color: currentColor;"></md-circular-progress>
+            </div>
         </div>
-        <md-filled-button style="--_container-color: var(--theme-color);" v-if="status.locked" @click="lockopen">
+        <md-filled-button :disabled="status.loading" style="--_container-color: var(--theme-color);"
+            v-if="status.locked" @click="lockopen">
             解锁
             <svg viewBox="0 -960 960 960" slot="icon">
                 <path
@@ -26,7 +30,8 @@
                 </path>
             </svg>
         </md-filled-button>
-        <md-filled-button style="--_container-color: var(--theme-color);" v-else @click="lock">
+        <md-filled-button :disabled="status.loading" style="--_container-color: var(--theme-color);" v-else
+            @click="lock">
             锁定
             <svg viewBox="0 -960 960 960" slot="icon">
                 <path
@@ -39,10 +44,12 @@
 <script setup lang="ts">
 import '@material/web/button/filled-button'
 import '@material/web/button/outlined-button'
+import '@material/web/progress/circular-progress'
 import { useConnectStore } from '@/stores/connect'
 const connectStore = useConnectStore()
 const status = reactive({
-    locked: false
+    locked: false,
+    loading: false
 })
 onMounted(() => {
     connectStore.onMessage((msg) => {
@@ -52,14 +59,18 @@ onMounted(() => {
 })
 
 async function lock() {
+    status.loading = true
     await fetch("/api/lock", {
         method: "POST"
     })
+    status.loading = false
 }
-async function lockopen(){
-    await fetch("/api/lockopen",{
+async function lockopen() {
+    status.loading = true
+    await fetch("/api/lockopen", {
         method: "POST"
     })
+    status.loading = false
 }
 </script>
 <style lang="scss" scoped>
@@ -76,7 +87,8 @@ async function lockopen(){
         height: 250px;
 
         .lock,
-        .lockopen {
+        .lockopen,
+        .loading {
             width: 100%;
             height: 100%;
             background-color: white;
@@ -93,13 +105,16 @@ async function lockopen(){
             }
 
             &.lock {
-                color: rgb(144, 0, 0);
-                background-color: rgba(255, 0, 0, 0.236);
+                color: rgb(211, 0, 0);
+                background: linear-gradient(to bottom right, rgba(255, 0, 0, 0.236), rgb(255, 114, 114));
             }
 
             &.lockopen {
                 color: rgb(0, 177, 0);
-                background-color: rgba(0, 255, 0, 0.21);
+                background: linear-gradient(to bottom right, rgba(136, 255, 0, 0.236), rgb(114, 255, 194));
+            }
+            &.loading{
+                background: linear-gradient(to bottom right, white, rgb(187, 187, 187));
             }
         }
     }
